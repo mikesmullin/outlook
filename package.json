@@ -1,0 +1,28 @@
+{
+  "name": "outlook-email",
+  "version": "1.0.0",
+  "description": "Office 365 integration plugin for email",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "outlook-email": "./outlook-email.mjs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "inbox": "bun outlook-email.mjs inbox",
+    "pull": "bun outlook-email.mjs pull"
+  },
+  "keywords": [
+    "office365",
+    "outlook",
+    "microsoft-graph",
+    "email"
+  ],
+  "author": "Mike Smullin <mike@smullindesign.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "js-yaml": "^4.1.0",
+    "pg": "^8.16.3"
+  }
+}

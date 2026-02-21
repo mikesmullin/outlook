@@ -5,7 +5,7 @@ Office 365 email CLI.
 ## Features
 
 - **Email Management**: Read, search, and process inbox emails
-- **ETL to YAML**: Extract unread emails to a flat-file YAML database
+- **ETL to YAML**: Extract emails to a flat-file YAML database
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ Required scopes:
 ## Usage
 
 ### Pull & Store Emails (ETL)
-Fetch unread emails since a given date and store as Markdown files in `storage/`:
+Fetch emails (read + unread) since a given date and store as Markdown files in `storage/`:
 
 ```bash
 # Fetch emails from the last 7 days
@@ -52,11 +52,12 @@ bun outlook-email.mjs pull --since 2026-01-01
 
 #### Pull Script Details
 
-- **Fetches**: All unread emails received on or after the specified date
+- **Fetches**: All emails (read and unread) received on or after the specified date
 - **Ordering**: Newest to oldest (most recent first)
 - **Pagination**: Automatically handles pagination, stops when past the cutoff date
 - **Storage**: Each email is saved as a Markdown file under `storage/<id>.md` where `id` is a SHA1 hash of the Outlook email ID
 - **Deduplication**: Files are never overwritten; re-running the script skips existing files
+- **Remote behavior**: Pull is read-only against Outlook (does not mark read, move, or otherwise mutate messages)
 - **Content**: Emails are stored as Markdown with YAML frontmatter:
   - **Frontmatter**: Email metadata (id, from, recipients, timestamps, etc.)
   - **Body**: Email body stored as a code block (HTML or Text)
@@ -83,10 +84,30 @@ bun link
 Then use from anywhere:
 ```bash
 outlook-email inbox summary
-outlook-email inbox list --limit 20
-outlook-email inbox view f86bca
-outlook-email inbox read f86bca
-outlook-email inbox unread f86bca
+outlook-email list --limit 20
+outlook-email view f86bca
+outlook-email read f86bca
+outlook-email unread f86bca
+outlook-email plan
+outlook-email apply
+outlook-email clean
+```
+
+Queue and apply offline changes:
+```bash
+# Queue changes locally
+outlook-email read f86bca
+
+# Preview queued changes
+outlook-email plan
+
+# Apply queued changes to Outlook
+outlook-email apply
+```
+
+Clear local cache for a fresh pull:
+```bash
+outlook-email clean
 ```
 
 ### ID Matching (Git-style)
@@ -98,13 +119,13 @@ All commands accepting an `<id>` parameter support partial ID matching like Git:
 outlook-email inbox view 6498cec18d676f08ff64932bf93e7ec33c0adb2b
 
 # Short ID (first 6 chars)
-outlook-email inbox view 6498ce
+outlook-email view 6498ce
 
 # Any prefix
-outlook-email inbox view 6498cec18d67
+outlook-email view 6498cec18d67
 
 # Filename format
-outlook-email inbox view 6498cec18d676f08ff64932bf93e7ec33c0adb2b.yml
+outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b.yml
 ```
 
 As long as the prefix is unique, it will match the email. If ambiguous, you'll get an error with all matching IDs.
@@ -133,7 +154,7 @@ Overall:
   Total:  47
 ```
 
-#### `outlook-email inbox list`
+#### `outlook-email list`
 List unread emails from storage (newest first). Omits emails marked `offline.read: true` unless `--all` is passed.
 
 Options:
@@ -144,16 +165,16 @@ Options:
 Examples:
 ```bash
 # Show 20 unread emails (default newest first)
-outlook-email inbox list --limit 20
+outlook-email list --limit 20
 
 # Show emails from yesterday
-outlook-email inbox list --since yesterday --limit 10
+outlook-email list --since yesterday --limit 10
 
 # Show all emails including read ones
-outlook-email inbox list --all --limit 50
+outlook-email list --all --limit 50
 
 # Show emails from specific date
-outlook-email inbox list --since 2026-01-01
+outlook-email list --since 2026-01-01
 ```
 
 Output format: `<short_id> / <relative_date> / <sender_name> <sender_email>`
@@ -174,22 +195,22 @@ Payroll for 2026
 
 Output is formatted with ANSI color codes for easy visual parsing.
 
-#### `outlook-email inbox view <id>`
+#### `outlook-email view <id>`
 Display a single email (print full YAML). Supports partial ID matching.
 
 ```bash
 # Full ID
-outlook-email inbox view 6498cec18d676f08ff64932bf93e7ec33c0adb2b
+outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b
 
 # Short ID
-outlook-email inbox view 6498ce
+outlook-email view 6498ce
 ```
 
-#### `outlook-email inbox read <id>`
+#### `outlook-email read <id>`
 Mark an email as read (offline only, updates YAML file). Adds `offline.read: true` and `offline.readAt` timestamp. Supports partial ID matching.
 
 ```bash
-outlook-email inbox read 6498ce
+outlook-email read 6498ce
 ```
 
 Output:
@@ -198,11 +219,11 @@ Output:
   [Admin] - Password Reset
 ```
 
-#### `outlook-email inbox unread <id>`
+#### `outlook-email unread <id>`
 Mark an email as unread (offline only, removes `offline.read` from YAML file). Supports partial ID matching.
 
 ```bash
-outlook-email inbox unread 6498ce
+outlook-email unread 6498ce
 ```
 
 Output:

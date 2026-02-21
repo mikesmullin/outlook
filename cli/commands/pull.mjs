@@ -1,4 +1,5 @@
 import { getGraphClient } from '../../cli/lib/client.mjs';
+import { loadEmail, saveEmail } from '../../cli/lib/storage.mjs';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
@@ -127,35 +128,6 @@ async function writeEmailToMarkdown(hash, email) {
     await fs.writeFile(filePath, mdContent, 'utf8');
 }
 
-/**
- * Get ID of the "Processed" folder
- * @param {object} client - Microsoft Graph client
- * @returns {Promise<string>} Folder ID
- */
-async function getProcessedFolderId(client) {
-    try {
-        const response = await client
-            .api('/me/mailFolders')
-            .filter("displayName eq 'Processed'")
-            .get();
-
-        if (response.value && response.value.length > 0) {
-            return response.value[0].id;
-        }
-
-        // If not found, create it
-        const createResponse = await client
-            .api('/me/mailFolders')
-            .post({
-                displayName: 'Processed',
-            });
-
-        return createResponse.id;
-    } catch (error) {
-        throw new Error(`Failed to get/create Processed folder: ${error.message}`);
-    }
-}
-
 async function getRootFolders(client) {
     const response = await client
         .api('/me/mailFolders')
@@ -196,54 +168,17 @@ async function findFolderByName(client, targetName) {
 }
 
 /**
- * Mark email as read
- * @param {object} client - Microsoft Graph client
- * @param {string} messageId - Email message ID
- */
-async function markAsRead(client, messageId) {
-    try {
-        await client
-            .api(`/me/messages/${messageId}`)
-            .patch({
-                isRead: true,
-            });
-    } catch (error) {
-        throw new Error(`Failed to mark email as read: ${error.message}`);
-    }
-}
-
-/**
- * Move email to folder and return the moved message with new id/webLink and return the moved message with new id/webLink
- * @param {object} client - Microsoft Graph client
- * @param {string} messageId - Email message ID
- * @param {string} folderId - Target folder ID
- * @returns {Promise<object>} Moved message with new id and webLink
- */
-async function moveToFolder(client, messageId, folderId) {
-    try {
-        const movedMessage = await client
-            .api(`/me/messages/${messageId}/move`)
-            .post({
-                destinationId: folderId,
-            });
-        return movedMessage;
-    } catch (error) {
-        throw new Error(`Failed to move email to folder: ${error.message}`);
-    }
-}
-
-/**
- * Fetch unread emails since given date
+ * Fetch emails (read and unread) since given date
  * @param {Date} sinceDate - Fetch emails received on or after this date
  * @param {object} client - Microsoft Graph client
  * @returns {Promise<Array>} Array of emails
  */
-async function fetchUnreadEmailsSinceDate(sinceDate, client, sourceFolderId = 'inbox') {
+async function fetchEmailsSinceDate(sinceDate, client, sourceFolderId = 'inbox') {
     const emails = [];
     const sinceDateStr = sinceDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
-    // Filter for unread emails received on or after sinceDate
-    const filter = `isRead eq false and receivedDateTime ge ${sinceDate.toISOString()}`;
+    // Filter for all emails received on or after sinceDate
+    const filter = `receivedDateTime ge ${sinceDate.toISOString()}`;
 
     try {
         let hasMore = true;
@@ -309,7 +244,7 @@ function printUsage() {
 Usage: outlook-email pull --since <date> [options]
 
 Required:
-  --since <date>  Fetch unread emails since this date
+  --since <date>  Fetch emails since this date
                   Accepted formats:
                     - YYYY-MM-DD (e.g., 2026-01-01)
                     - yesterday
@@ -317,13 +252,13 @@ Required:
 
 Options:
   -l, --limit <n>  Limit processing to first N emails (optional)
-    --folder <name>   Source folder name (default: Inbox)
-  --help            Show this help message
+  --folder <name>  Source folder name (default: Inbox)
+  --help           Show this help message
 
 Examples:
   outlook-email pull --since 2026-01-01
   outlook-email pull --since yesterday --limit 5
-    outlook-email pull --since yesterday --folder Alerts --limit 4
+  outlook-email pull --since yesterday --folder Alerts --limit 4
   outlook-email pull --since "7 days ago"
 `);
 }
@@ -383,7 +318,7 @@ export default async function pullCommand(args) {
         process.exit(1);
     }
 
-    console.log(`Fetching unread emails since: ${sinceDate.toISOString().split('T')[0]}`);
+    console.log(`Fetching emails since: ${sinceDate.toISOString().split('T')[0]}`);
     console.log(`Source folder: ${sourceFolderName}`);
     if (limit) {
         console.log(`Processing limit: ${limit}`);
@@ -396,9 +331,6 @@ export default async function pullCommand(args) {
         // Ensure storage directory exists
         await ensureStorageDir();
 
-        // Get Processed folder ID
-        const processedFolderId = await getProcessedFolderId(client);
-
         // Resolve source folder ID if not Inbox
         if (sourceFolderName.toLowerCase() !== 'inbox') {
             const sourceFolder = await findFolderByName(client, sourceFolderName);
@@ -410,14 +342,14 @@ export default async function pullCommand(args) {
         }
 
         // Fetch emails
-        const emails = await fetchUnreadEmailsSinceDate(sinceDate, client, sourceFolderId);
+        const emails = await fetchEmailsSinceDate(sinceDate, client, sourceFolderId);
 
         if (emails.length === 0) {
-            console.log('No unread emails found.');
+            console.log('No emails found.');
             return;
         }
 
-        console.log(`Found ${emails.length} unread emails.`);
+        console.log(`Found ${emails.length} emails.`);
 
         let written = 0;
         let skipped = 0;
@@ -443,34 +375,21 @@ export default async function pullCommand(args) {
                         ...email,
                         _stored_id: hash,
                         _stored_at: new Date().toISOString(),
+                        _source_folder: sourceFolderName,
                     };
 
                     await writeEmailToMarkdown(hash, emailWithHash);
                     console.log(`✓ Stored: ${formatEmailRef(hash, email.subject)}`);
                     written++;
                 } else {
+                    // Patch _source_folder if it was stored before this field existed
+                    const existing = await loadEmail(hash);
+                    if (existing && !existing._source_folder) {
+                        existing._source_folder = sourceFolderName;
+                        await saveEmail(hash, existing);
+                    }
                     console.log(`⊘ Skipped (exists): ${formatEmailRef(hash, email.subject)}`);
                     skipped++;
-                }
-
-                // Mark as read and move to Processed folder
-                console.log(`  → Marking as read...`);
-                await markAsRead(client, email.id);
-                console.log(`  → Moving to Processed folder...`);
-                const movedMessage = await moveToFolder(client, email.id, processedFolderId);
-                
-                // Update stored email with new webLink from moved message
-                if (movedMessage && movedMessage.webLink) {
-                    email.webLink = movedMessage.webLink;
-                    const emailWithHash = {
-                        ...email,
-                        _stored_id: hash,
-                        _stored_at: new Date().toISOString(),
-                    };
-                    await writeEmailToMarkdown(hash, emailWithHash);
-                    console.log(`  ✓ Updated in Outlook (webLink updated)`);
-                } else {
-                    console.log(`  ✓ Updated in Outlook`);
                 }
 
                 processed++;

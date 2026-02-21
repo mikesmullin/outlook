@@ -80,11 +80,11 @@ All CLI commands support partial IDs. The system matches the longest unique pref
 
 ```bash
 # These all refer to the same email:
-outlook-email inbox view 6498cec18d676f08ff64932bf93e7ec33c0adb2b  # Full (40 chars)
-outlook-email inbox view 6498cec18d676f08                            # 16 chars
-outlook-email inbox view 6498ce                                      # 6 chars (short)
-outlook-email inbox view 6498                                        # 4 chars (if unique)
-outlook-email inbox view 6498cec18d676f08ff64932bf93e7ec33c0adb2b.md  # Filename format
+outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b  # Full (40 chars)
+outlook-email view 6498cec18d676f08                            # 16 chars
+outlook-email view 6498ce                                      # 6 chars (short)
+outlook-email view 6498                                        # 4 chars (if unique)
+outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b.md  # Filename format
 ```
 
 Error on ambiguity:
@@ -162,7 +162,7 @@ Summary:
 **Best Practices**:
 - Always use `--limit 1` unless you need to bulk import
 - Use `--since yesterday` or `--since "1 day ago"` for recent emails
-- After pulling, use `outlook-email inbox list` to see the new email
+- After pulling, use `outlook-email list` to see the new email
 - The `webLink` field in the stored file opens the email directly in Outlook
 
 ## Offline Mode: Analysis & Metadata
@@ -171,69 +171,35 @@ Summary:
 
 All `outlook-email` commands work purely offline, reading/writing YAML files in `storage/`.
 
-### Command: `outlook-email inbox summary`
-
-**Purpose**: Get overall email statistics
-
-**Command**:
-```bash
-outlook-email inbox summary
-```
-
-**Output**:
-```
-Folder Summary:
-===============
-Inbox:
-  Unread: 46
-  Read:   1
-  Total:  47
-
-Overall:
-  Unread: 46
-  Read:   1
-  Total:  47
-```
-
-**Use Cases**:
-- Verify email counts before processing
-- Track unread vs read ratio
-- Baseline for monitoring workflows
-
-### Command: `outlook-email inbox list [OPTIONS]`
+### Command: `outlook-email list [OPTIONS]`
 
 **Purpose**: List emails with filtering and display
 
 **Command**:
 ```bash
-outlook-email inbox list [--limit N] [--since DATE] [--all]
+outlook-email list [--limit N] [--since DATE] [--folder NAME]
 ```
 
 **Options**:
 - `-l, --limit <n>`: Max results (default: 10)
 - `--since <date>`: Filter emails after date (same formats as pull)
-- `-a, --all`: Include read emails (default: unread only)
+- `--folder <name>`: Only show emails from this source folder (e.g. `Processed`, `Inbox`)
 
 **Output Format**:
 ```
-<short_id> / <relative_date> / <sender_name> <sender_email>
-<subject>
+📧 <total> emails (showing <n>):
+
+   1.  <short_id>  <relative_date>  <sender_name>  <subject>
+   2.  ...
 ```
 
 **Output Example**:
 ```
-Showing 3 of 46 emails:
+📧 3 emails:
 
-f86bca / Today 10:00 / Science Operations <ScienceOperations@bigco.com>
-Science record review request
-
-cda64a / Today 9:46 / Alice Johnson <noreply@github.bigco.net>
-Re: [fowl-dept] Create new decorative turkey slices (PR #537)
-
-8fb5bf / Today 9:01 / U.S. Payroll <payroll@bigco.com>
-Payroll for 2026
-
-... and 43 more
+   1.  659520  01/05      Jane Smith                  Re: [eng/deploy-tools] Update config.yaml (PR #42)
+   2.  2d6309  01/05      Bob Johnson                 Re: Cleanup unused staging environment
+   3.  e20ba3  01/05      Carol Williams              Cleanup unused staging environment
 ```
 
 **Use Cases**:
@@ -242,13 +208,13 @@ Payroll for 2026
 - Show all (including read) for review
 - Pipeline output to other tools
 
-### Command: `outlook-email inbox view <id>`
+### Command: `outlook-email view <id>`
 
 **Purpose**: Display full YAML content of an email
 
 **Command**:
 ```bash
-outlook-email inbox view <id>
+outlook-email view <id>
 ```
 
 **Supports**: Partial IDs, full IDs, or filename format
@@ -264,22 +230,22 @@ outlook-email inbox view <id>
 **Example**:
 ```bash
 # View full email
-outlook-email inbox view 6498ce
+outlook-email view 6498ce
 
 # Parse specific field with yq
-outlook-email inbox view 6498ce | yq '.subject'
+outlook-email view 6498ce | yq '.subject'
 
 # Extract body and save
-outlook-email inbox view 6498ce | yq '.body.content' > email_body.html
+outlook-email view 6498ce | yq '.body.content' > email_body.html
 ```
 
-### Command: `outlook-email inbox read <id>`
+### Command: `outlook-email read <id>`
 
 **Purpose**: Mark an email as read (offline only)
 
 **Command**:
 ```bash
-outlook-email inbox read <id>
+outlook-email read <id>
 ```
 
 **Effect**: 
@@ -298,13 +264,13 @@ outlook-email inbox read <id>
 - Track which emails have been reviewed
 - Pipeline processing: pull → process → mark read
 
-### Command: `outlook-email inbox unread <id>`
+### Command: `outlook-email unread <id>`
 
 **Purpose**: Mark an email as unread (offline only, reverses read state)
 
 **Command**:
 ```bash
-outlook-email inbox unread <id>
+outlook-email unread <id>
 ```
 
 **Effect**:
@@ -331,19 +297,15 @@ outlook-email inbox unread <id>
 **Steps**:
 ```bash
 # 1. Pull emails from past 24 hours
-bun actions/pull.mjs --since "1 day ago"
+outlook-email pull --since "1 day ago"
 # Output: Stored 12 new emails, marked as read/processed in Outlook
 
-# 2. Check statistics
-outlook-email inbox summary
-# Output: 23 unread (older), 12 read (new)
-
-# 3. List new emails for review
-outlook-email inbox list --since yesterday --limit 20
+# 2. List new emails for review
+outlook-email list --since yesterday --limit 20
 # Output: Shows today's emails with sender/subject
 
-# 4. Extract emails for batch analysis
-outlook-email inbox list --since yesterday --all > /tmp/emails.txt
+# 3. Extract emails for batch analysis
+outlook-email list --since yesterday --limit 100 > /tmp/emails.txt
 # Can then pipe to custom analysis scripts
 ```
 
@@ -354,23 +316,23 @@ outlook-email inbox list --since yesterday --all > /tmp/emails.txt
 **Steps**:
 ```bash
 # 1. Pull new alerts
-bun actions/pull.mjs --since "1 hour ago" --limit 50
+outlook-email pull --since "1 hour ago" --limit 50
 
 # 2. List and find critical emails
-outlook-email inbox list --limit 100 | grep -i "critical\|alert"
+outlook-email list --limit 100 | grep -i "critical\|alert"
 
 # 3. For each critical email, extract and analyze
 for id in f86bca 8fb5bf a4ae87; do
-  outlook-email inbox view $id | yq '.subject, .from.emailAddress.address'
+  outlook-email view $id | yq '.subject, .from.emailAddress.address'
 done
 
 # 4. Mark processed
-outlook-email inbox read f86bca
-outlook-email inbox read 8fb5bf
-outlook-email inbox read a4ae87
+outlook-email read f86bca
+outlook-email read 8fb5bf
+outlook-email read a4ae87
 
 # 5. Verify
-outlook-email inbox summary  # Should show increased 'Read' count
+outlook-email list --limit 10  # Confirm read count reduced
 ```
 
 ### Scenario 3: Time-based Filtering & Archive
@@ -380,15 +342,15 @@ outlook-email inbox summary  # Should show increased 'Read' count
 **Steps**:
 ```bash
 # 1. List only recent unread (past 3 days)
-outlook-email inbox list --since "3 days ago" --limit 50
+outlook-email list --since "3 days ago" --limit 50
 
 # 2. Export all emails from specific date for archival
-outlook-email inbox list --since 2026-01-01 --all --limit 1000 > archive_2026_01_01.txt
+outlook-email list --since 2026-01-01 --all --limit 1000 > archive_2026_01_01.txt
 
 # 3. Extract emails for backup
 for file in storage/*.yml; do
   id=$(basename "$file" .yml)
-  outlook-email inbox view "$id" >> backup_all_emails.yaml
+  outlook-email view "$id" >> backup_all_emails.yaml
 done
 ```
 
@@ -399,17 +361,17 @@ done
 **Steps**:
 ```bash
 # 1. Pull recent emails
-bun actions/pull.mjs --since yesterday
+outlook-email pull --since yesterday
 
-# 2. Extract HTML bodies for analysis
-outlook-email inbox list --limit 20 --all | awk '{print $1}' | while read id; do
+# 2. Extract HTML bodies for analysis (strip HTML tags since lynx may not be available)
+outlook-email list --limit 20 | awk '{print $3}' | while read id; do
   echo "=== Email: $id ==="
-  outlook-email inbox view "$id" | yq '.body.content' | lynx -dump -stdin
+  outlook-email view "$id" | yq '.body.content' | sed 's/<[^>]*>//g' | sed '/^[[:space:]]*$/d'
 done
 
 # 3. Or extract sender domains for analysis
-outlook-email inbox list --all --limit 100 | while read line; do
-  outlook-email inbox view "$line" | yq '.from.emailAddress.address' | awk -F@ '{print $2}'
+outlook-email list --all --limit 100 | while read line; do
+  outlook-email view "$line" | yq '.from.emailAddress.address' | awk -F@ '{print $2}'
 done | sort | uniq -c
 ```
 
@@ -420,20 +382,17 @@ done | sort | uniq -c
 **Steps**:
 ```bash
 # 1. Test with limit=1, check output
-bun actions/pull.mjs --since yesterday --limit 1
+outlook-email pull --since yesterday --limit 1
 # Shows: Found N emails, Processed 1
 
 # 2. Check stored file exists
 ls -lh storage/*.yml | tail -1
 
 # 3. View the stored email
-outlook-email inbox view $(ls storage/*.yml | tail -1 | xargs basename -s .yml)
+outlook-email list --limit 1
 
-# 4. Check summary
-outlook-email inbox summary
-
-# 5. If good, run full pull without limit
-bun actions/pull.mjs --since yesterday
+# 4. If good, run full pull without limit
+outlook-email pull --since yesterday
 ```
 
 ### Scenario 6: Integration with External Tools
@@ -443,8 +402,8 @@ bun actions/pull.mjs --since yesterday
 **Steps**:
 ```bash
 # 1. Export as JSON for database insertion
-outlook-email inbox list --all --limit 100 | while read line; do
-  outlook-email inbox view "$line"
+outlook-email list --all --limit 100 | while read line; do
+  outlook-email view "$line"
 done | yq -r -s 'map({id: ._stored_id, subject, from: .from.emailAddress.address, date: .receivedDateTime}) | .[] | @json' > emails.jsonl
 
 # 2. Push to database
@@ -453,9 +412,9 @@ cat emails.jsonl | while read json; do
 done
 
 # 3. Or export CSV
-outlook-email inbox list --all | while read line; do
+outlook-email list --all | while read line; do
   id=$(echo "$line" | awk '{print $1}')
-  outlook-email inbox view "$id" | yq -r '[.from.emailAddress.address, .subject, .receivedDateTime] | @csv'
+  outlook-email view "$id" | yq -r '[.from.emailAddress.address, .subject, .receivedDateTime] | @csv'
 done > emails.csv
 ```
 
@@ -465,24 +424,23 @@ done > emails.csv
 
 ```bash
 # Typical agent workflow
-1. bun actions/pull.mjs --since yesterday       # Get new emails
-2. outlook-email inbox summary                   # Get stats
-3. outlook-email inbox list --limit 50          # Scan subjects
-4. outlook-email inbox view <id>                # Get full content
-5. <agent analyzes>
-6. outlook-email inbox read <id>                # Mark processed
+1. outlook-email pull --since yesterday       # Get new emails
+2. outlook-email list --limit 50             # Scan subjects
+3. outlook-email view <id>                   # Get full content
+4. <agent analyzes>
+5. outlook-email read <id>                   # Mark processed
 ```
 
 ### Pattern 2: Incremental Processing
 
 ```bash
 # Process in batches to avoid overwhelming
-1. bun actions/pull.mjs --since yesterday --limit 20    # Get batch
+1. outlook-email pull --since yesterday --limit 20    # Get batch
 2. for each email:
-   a. outlook-email inbox view <id> | extract content
+   a. outlook-email view <id> | extract content
    b. Send to AI for analysis
    c. Store result in database
-   d. outlook-email inbox read <id>  # Mark done
+   d. outlook-email read <id>  # Mark done
 3. Repeat if more emails available
 ```
 
@@ -495,7 +453,7 @@ done > emails.csv
 3. If error:
    - Log error + email ID
    - Do NOT mark as read (leave unread for retry)
-4. outlook-email inbox unread <id>  # Explicitly reset if needed
+4. outlook-email unread <id>  # Explicitly reset if needed
 5. Retry later
 ```
 
@@ -503,26 +461,26 @@ done > emails.csv
 
 ```bash
 # Find and process specific email types
-1. bun actions/pull.mjs --since "7 days ago"
-2. outlook-email inbox list --all | grep "critical\|urgent"
+1. outlook-email pull --since "7 days ago"
+2. outlook-email list --all | grep "critical\|urgent"
 3. For each match:
-   - outlook-email inbox view <id> > /tmp/email.yaml
+   - outlook-email view <id> > /tmp/email.yaml
    - Extract subject/sender/body via yq
    - Process with priority logic
-   - outlook-email inbox read <id>
+   - outlook-email read <id>
 ```
 
 ## Data Access Examples
 
 ### Extract Sender Name
 ```bash
-outlook-email inbox view 6498ce | yq '.from.emailAddress.name'
+outlook-email view 6498ce | yq '.from.emailAddress.name'
 # Output: "Server Administration"
 ```
 
 ### Extract All Recipients
 ```bash
-outlook-email inbox view 6498ce | yq '.toRecipients[].emailAddress.address'
+outlook-email view 6498ce | yq '.toRecipients[].emailAddress.address'
 # Output: 
 # team@company.com
 # otherteam@company.com
@@ -530,58 +488,58 @@ outlook-email inbox view 6498ce | yq '.toRecipients[].emailAddress.address'
 
 ### Extract Email Subject
 ```bash
-outlook-email inbox view 6498ce | yq '.subject'
+outlook-email view 6498ce | yq '.subject'
 # Output: "[Admin] - LDAP Password Reset"
 ```
 
 ### Extract Received Date
 ```bash
-outlook-email inbox view 6498ce | yq '.receivedDateTime'
+outlook-email view 6498ce | yq '.receivedDateTime'
 # Output: "2026-01-05T17:02:54Z"
 ```
 
 ### Check Read Status (Offline)
 ```bash
-outlook-email inbox view 6498ce | yq '.offline.read'
+outlook-email view 6498ce | yq '.offline.read'
 # Output: true (if read), null (if unread)
 ```
 
 ### Extract Body Text
 ```bash
-outlook-email inbox view 6498ce | yq '.body.content' | lynx -dump -stdin
-# Renders HTML email to readable text
+# Strip HTML tags to get readable plain text (lynx may not be installed)
+outlook-email view 6498ce | yq '.body.content' | sed 's/<[^>]*>//g' | sed '/^[[:space:]]*$/d'
 ```
 
 ## Common Tasks
 
 ### Task: List all emails from specific sender
 ```bash
-outlook-email inbox list --all --limit 1000 | grep "alice@company.com"
+outlook-email list --all --limit 1000 | grep "alice@company.com"
 ```
 
 ### Task: Count emails by sender
 ```bash
 for id in $(ls storage/*.yml | xargs -I{} basename {} .yml | head -100); do
-  outlook-email inbox view "$id" | yq '.from.emailAddress.address'
+  outlook-email view "$id" | yq '.from.emailAddress.address'
 done | sort | uniq -c | sort -rn
 ```
 
 ### Task: Find emails with specific keywords
 ```bash
-outlook-email inbox list --all | grep -E "urgent|critical|alert" | awk '{print $1}' | while read id; do
-  outlook-email inbox view "$id" | yq '.subject'
+outlook-email list --all | grep -E "urgent|critical|alert" | awk '{print $1}' | while read id; do
+  outlook-email view "$id" | yq '.subject'
 done
 ```
 
 ### Task: Export email thread data
 ```bash
-outlook-email inbox view 6498ce | yq '{subject, from: .from.emailAddress, sent: .receivedDateTime, recipients: .toRecipients[].emailAddress.address}'
+outlook-email view 6498ce | yq '{subject, from: .from.emailAddress, sent: .receivedDateTime, recipients: .toRecipients[].emailAddress.address}'
 ```
 
 ### Task: Bulk mark emails as read
 ```bash
-outlook-email inbox list --limit 50 | awk '{print $1}' | while read id; do
-  outlook-email inbox read "$id"
+outlook-email list --limit 50 | awk '{print $1}' | while read id; do
+  outlook-email read "$id"
 done
 ```
 
@@ -589,30 +547,30 @@ done
 
 ### Ambiguous ID
 ```bash
-$ outlook-email inbox view 62
+$ outlook-email view 62
 Error: Ambiguous ID "62". Matches: 62e8e2d5adb20b15..., 62b19cb17ec4628a...
 ```
 **Resolution**: Use more specific prefix (e.g., `62e8e2`)
 
 ### Email Not Found
 ```bash
-$ outlook-email inbox view abcdef
+$ outlook-email view abcdef
 Email not found: abcdef
 ```
 **Resolution**: Check ID is correct, or list emails to find ID
 
 ### Already Read/Unread
 ```bash
-$ outlook-email inbox read 6498ce
+$ outlook-email read 6498ce
 ⊘ Email already marked as read: 6498cec18d676f08ff64932bf93e7ec33c0adb2b
 ```
 **Resolution**: Normal - idempotent operation, safe to retry
 
 ## Tips for AI Agents
 
-1. **Always check summary first**: `outlook-email inbox summary` to understand data volume
+1. **Always check what's available first**: `outlook-email list --limit 10` to understand data volume 
 2. **Use partial IDs**: Shorter `6498ce` instead of full `6498cec18d676f08...` for commands
-3. **Pipe to tools**: `outlook-email inbox view <id> | yq '.field'` to extract structured data
+3. **Pipe to tools**: `outlook-email view <id> | yq '.field'` to extract structured data
 4. **Test with limit**: Use `--limit 5` or `--limit 1` when prototyping workflows
 5. **Check for duplicates**: `--since` with pull handles deduplication automatically
 6. **Mark processed**: Always `read` after processing to track state
@@ -628,4 +586,4 @@ $ outlook-email inbox read 6498ce
 - **Stateless**: Each command is independent; safe to run in parallel on different date ranges
 - **Deduplication**: SHA1 hashing ensures same Outlook email = same storage file
 - **Offline metadata**: `offline.*` fields are never overwritten by pull (pull only reads Outlook data)
-- **Single direction**: `pull` syncs Outlook → storage; `read/unread` mark locally only (don't sync back)
+- **Single direction**: `pull` syncs Outlook → storage; `read`/`unread` mark locally only (don't sync back)

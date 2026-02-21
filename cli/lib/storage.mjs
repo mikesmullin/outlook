@@ -144,6 +144,10 @@ ${formattedBody}
  * @returns {boolean}
  */
 export function isEmailRead(email) {
+    const pendingRead = email?.offline?.pending?.read;
+    if (typeof pendingRead === 'boolean') {
+        return pendingRead;
+    }
     return email?.offline?.read === true;
 }
 
@@ -153,7 +157,20 @@ export function isEmailRead(email) {
  * @returns {string}
  */
 export function getEmailFolder(email) {
-    return 'Inbox'; // All stored emails are from inbox currently
+    return email?._source_folder || email?.parentFolderName || '';
+}
+
+/**
+ * Delete an email file from storage
+ * @param {string} id - Email hash ID
+ */
+export async function deleteEmail(id) {
+    try {
+        const filePath = path.join(STORAGE_DIR, `${id}.md`);
+        await fs.unlink(filePath);
+    } catch (error) {
+        throw new Error(`Failed to delete email: ${error.message}`);
+    }
 }
 
 /**

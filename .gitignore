@@ -2,3 +2,4 @@ node_modules/
 .tokens.yaml
 /tmp/
 /storage/
+.vscode/

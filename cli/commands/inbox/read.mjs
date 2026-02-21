@@ -4,17 +4,17 @@ import { findEmailById, colorize, colors } from '../../lib/utils.mjs';
 export default async function readCommand(args) {
     if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
         console.log(`
-Usage: outlook-email inbox read <id>
+Usage: outlook-email read <id>
 
-Mark an email as read (offline). Adds 'offline.read: true' to the YAML file.
+Queue an email to be marked as read (offline). Adds 'offline.pending.read: true' to the YAML file.
 
 Arguments:
   <id>    Email hash ID, partial ID, or filename (e.g., f86bca, f86bca73ca8a, f86bca73ca8afaa2ed51d827e82d190644fc1ff1)
 
 Examples:
-  outlook-email inbox read f86bca
-  outlook-email inbox read f86bca73ca8afaa2ed51d827e82d190644fc1ff1
-  outlook-email inbox read f86bca73ca8afaa2ed51d827e82d190644fc1ff1.yml
+  outlook-email read f86bca
+  outlook-email read f86bca73ca8afaa2ed51d827e82d190644fc1ff1
+  outlook-email read f86bca73ca8afaa2ed51d827e82d190644fc1ff1.yml
 `);
         return;
     }
@@ -34,19 +34,40 @@ Examples:
         email.offline = {};
     }
 
-    // Check if already marked as read
-    if (email.offline.read === true) {
-        console.log(`${colorize('⊘', colors.yellow)} Email already marked as read: ${id}`);
+    // Initialize pending object if it doesn't exist
+    if (!email.offline.pending) {
+        email.offline.pending = {};
+    }
+
+    const currentRead = email.offline.read === true;
+    const pendingRead = Object.prototype.hasOwnProperty.call(email.offline.pending, 'read')
+        ? email.offline.pending.read === true
+        : currentRead;
+
+    if (pendingRead === true) {
+        console.log(`${colorize('⊘', colors.yellow)} Email already queued as read: ${id}`);
         return;
     }
 
-    // Mark as read
-    email.offline.read = true;
-    email.offline.readAt = new Date().toISOString();
+    // Queue pending read change
+    email.offline.pending.read = true;
+
+    // Remove no-op pending if user flips back to current state
+    if (email.offline.pending.read === currentRead) {
+        delete email.offline.pending.read;
+    }
+
+    if (Object.keys(email.offline.pending).length === 0) {
+        delete email.offline.pending;
+    }
+
+    if (Object.keys(email.offline).length === 0) {
+        delete email.offline;
+    }
 
     await saveEmail(id, email);
 
     const subject = email.subject || '(No Subject)';
-    console.log(`${colorize('✓', colors.green)} Marked as read: ${id}`);
+    console.log(`${colorize('✓', colors.green)} Queued mark-read: ${id}`);
     console.log(`  ${subject}`);
 }

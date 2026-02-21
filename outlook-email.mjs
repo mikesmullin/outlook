@@ -8,6 +8,8 @@ import viewCommand from './cli/commands/inbox/view.mjs';
 import readCommand from './cli/commands/inbox/read.mjs';
 import unreadCommand from './cli/commands/inbox/unread.mjs';
 import deleteCommand from './cli/commands/inbox/delete.mjs';
+import processedCommand from './cli/commands/inbox/processed.mjs';
+import searchCommand from './cli/commands/search.mjs';
 import pullCommand from './cli/commands/pull.mjs';
 import folderCommand from './cli/commands/folder.mjs';
 import cleanCommand from './cli/commands/clean.mjs';
@@ -28,6 +30,8 @@ Commands:
   read <id>                    Queue mark-read for an email (offline)
   unread <id>                  Queue mark-unread for an email (offline)
   delete <id>                  Queue soft-delete for an email (offline)
+  processed <id>               Toggle local "processed" flag on an email (offline-only)
+  search <query>               Search emails via Microsoft Graph (online)
   folders                      List all mailbox folders as a tree
   pull --since <date>          Fetch emails from Outlook to local cache
   plan                         Preview queued offline changes
@@ -40,6 +44,9 @@ Options depend on the command. Use:
 Examples:
   outlook-email inbox move f86bca --folder Processed
   outlook-email list --limit 20
+  outlook-email list --all
+  outlook-email search "SSL classicteam"
+  outlook-email search "subject:SSL" --folder Inbox
   outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b
   outlook-email read 6498cec18d676f08ff64932bf93e7ec33c0adb2b
   outlook-email unread 6498cec18d676f08ff64932bf93e7ec33c0adb2b
@@ -101,6 +108,20 @@ async function main() {
     } else if (mainCommand === 'delete') {
         try {
             await deleteCommand(args.slice(1));
+        } catch (error) {
+            console.error('Error:', error.message);
+            process.exit(1);
+        }
+    } else if (mainCommand === 'processed') {
+        try {
+            await processedCommand(args.slice(1));
+        } catch (error) {
+            console.error('Error:', error.message);
+            process.exit(1);
+        }
+    } else if (mainCommand === 'search') {
+        try {
+            await searchCommand(args.slice(1));
         } catch (error) {
             console.error('Error:', error.message);
             process.exit(1);

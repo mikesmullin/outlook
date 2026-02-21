@@ -47,6 +47,7 @@ Options:
   --since <date>       Only show emails after this date
                        Formats: YYYY-MM-DD, yesterday, "N days ago"
   --folder <name>      Only show emails from this source folder
+  --all                Include emails already marked as processed
   --help               Show this help
 
 Examples:
@@ -61,10 +62,13 @@ Examples:
     let limit = DEFAULT_LIMIT;
     let sinceDate = null;
     let folderFilter = null;
+    let includeProcessed = false;
 
     // Parse arguments
     for (let i = 0; i < args.length; i++) {
-        if (args[i] === '-l' || args[i] === '--limit') {
+        if (args[i] === '--all') {
+            includeProcessed = true;
+        } else if (args[i] === '-l' || args[i] === '--limit') {
             if (i + 1 < args.length) {
                 limit = parseInt(args[i + 1], 10);
                 if (isNaN(limit) || limit <= 0) {
@@ -87,6 +91,11 @@ Examples:
 
     let emails = await loadAllEmails();
     const totalInStorage = emails.length;
+
+    // Filter out processed emails unless --all is passed
+    if (!includeProcessed) {
+        emails = emails.filter(({ email }) => email.offline?.processed !== true);
+    }
 
     // Filter by folder
     if (folderFilter) {

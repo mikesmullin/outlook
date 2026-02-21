@@ -156,6 +156,45 @@ async function getProcessedFolderId(client) {
     }
 }
 
+async function getRootFolders(client) {
+    const response = await client
+        .api('/me/mailFolders')
+        .select('id,displayName,childFolderCount')
+        .top(200)
+        .get();
+
+    return response.value || [];
+}
+
+async function getChildFolders(client, folderId) {
+    const response = await client
+        .api(`/me/mailFolders/${folderId}/childFolders`)
+        .select('id,displayName,childFolderCount')
+        .top(200)
+        .get();
+
+    return response.value || [];
+}
+
+async function findFolderByName(client, targetName) {
+    const queue = await getRootFolders(client);
+    const normalizedTarget = targetName.trim().toLowerCase();
+
+    while (queue.length > 0) {
+        const folder = queue.shift();
+        if ((folder.displayName || '').trim().toLowerCase() === normalizedTarget) {
+            return folder;
+        }
+
+        if (folder.childFolderCount && folder.childFolderCount > 0) {
+            const children = await getChildFolders(client, folder.id);
+            queue.push(...children);
+        }
+    }
+
+    return null;
+}
+
 /**
  * Mark email as read
  * @param {object} client - Microsoft Graph client
@@ -199,7 +238,7 @@ async function moveToFolder(client, messageId, folderId) {
  * @param {object} client - Microsoft Graph client
  * @returns {Promise<Array>} Array of emails
  */
-async function fetchUnreadEmailsSinceDate(sinceDate, client) {
+async function fetchUnreadEmailsSinceDate(sinceDate, client, sourceFolderId = 'inbox') {
     const emails = [];
     const sinceDateStr = sinceDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
@@ -212,7 +251,7 @@ async function fetchUnreadEmailsSinceDate(sinceDate, client) {
 
         while (hasMore) {
             let request = client
-                .api('/me/mailFolders/inbox/messages')
+                .api(`/me/mailFolders/${sourceFolderId}/messages`)
                 .filter(filter)
                 .select(
                     'id,from,subject,receivedDateTime,isRead,flag,body,bodyPreview,importance,hasAttachments,conversationId,sender,toRecipients,ccRecipients,bccRecipients,webLink'
@@ -278,11 +317,13 @@ Required:
 
 Options:
   -l, --limit <n>  Limit processing to first N emails (optional)
+    --folder <name>   Source folder name (default: Inbox)
   --help            Show this help message
 
 Examples:
   outlook-email pull --since 2026-01-01
   outlook-email pull --since yesterday --limit 5
+    outlook-email pull --since yesterday --folder Alerts --limit 4
   outlook-email pull --since "7 days ago"
 `);
 }
@@ -295,6 +336,8 @@ export default async function pullCommand(args) {
 
     let sinceDate = null;
     let limit = null;
+    let sourceFolderName = 'Inbox';
+    let sourceFolderId = 'inbox';
 
     // Parse arguments
     for (let i = 0; i < args.length; i++) {
@@ -323,6 +366,14 @@ export default async function pullCommand(args) {
                 console.error('Error: --limit requires a number');
                 process.exit(1);
             }
+        } else if (args[i] === '--folder') {
+            if (i + 1 < args.length) {
+                sourceFolderName = args[i + 1];
+                i++;
+            } else {
+                console.error('Error: --folder requires a folder name');
+                process.exit(1);
+            }
         }
     }
 
@@ -333,6 +384,7 @@ export default async function pullCommand(args) {
     }
 
     console.log(`Fetching unread emails since: ${sinceDate.toISOString().split('T')[0]}`);
+    console.log(`Source folder: ${sourceFolderName}`);
     if (limit) {
         console.log(`Processing limit: ${limit}`);
     }
@@ -347,8 +399,18 @@ export default async function pullCommand(args) {
         // Get Processed folder ID
         const processedFolderId = await getProcessedFolderId(client);
 
+        // Resolve source folder ID if not Inbox
+        if (sourceFolderName.toLowerCase() !== 'inbox') {
+            const sourceFolder = await findFolderByName(client, sourceFolderName);
+            if (!sourceFolder) {
+                throw new Error(`Folder not found: ${sourceFolderName}`);
+            }
+            sourceFolderId = sourceFolder.id;
+            sourceFolderName = sourceFolder.displayName;
+        }
+
         // Fetch emails
-        const emails = await fetchUnreadEmailsSinceDate(sinceDate, client);
+        const emails = await fetchUnreadEmailsSinceDate(sinceDate, client, sourceFolderId);
 
         if (emails.length === 0) {
             console.log('No unread emails found.');

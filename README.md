@@ -58,6 +58,7 @@ bun outlook-email.mjs pull --since 2026-01-01
 - **Storage**: Each email is saved as a Markdown file under `storage/<id>.md` where `id` is a SHA1 hash of the Outlook email ID
 - **Deduplication**: Files are never overwritten; re-running the script skips existing files
 - **Remote behavior**: Pull is read-only against Outlook (does not mark read, move, or otherwise mutate messages)
+- **Summary stats**: Prints `Oldest` and `Newest` for the selected source folder (date bounds in that folder)
 - **Content**: Emails are stored as Markdown with YAML frontmatter:
   - **Frontmatter**: Email metadata (id, from, recipients, timestamps, etc.)
   - **Body**: Email body stored as a code block (HTML or Text)

@@ -168,6 +168,40 @@ async function findFolderByName(client, targetName) {
 }
 
 /**
+ * Get oldest and newest email dates in a folder
+ * @param {object} client - Microsoft Graph client
+ * @param {string} folderId - Source folder id
+ * @returns {Promise<{oldest: string|null, newest: string|null}>}
+ */
+async function getFolderDateBounds(client, folderId = 'inbox') {
+    const [oldestResponse, newestResponse] = await Promise.all([
+        client
+            .api(`/me/mailFolders/${folderId}/messages`)
+            .select('receivedDateTime')
+            .orderby('receivedDateTime asc')
+            .top(1)
+            .get(),
+        client
+            .api(`/me/mailFolders/${folderId}/messages`)
+            .select('receivedDateTime')
+            .orderby('receivedDateTime desc')
+            .top(1)
+            .get(),
+    ]);
+
+    const oldest =
+        oldestResponse.value && oldestResponse.value.length > 0
+            ? oldestResponse.value[0].receivedDateTime || null
+            : null;
+    const newest =
+        newestResponse.value && newestResponse.value.length > 0
+            ? newestResponse.value[0].receivedDateTime || null
+            : null;
+
+    return { oldest, newest };
+}
+
+/**
  * Fetch emails (read and unread) since given date
  * @param {Date} sinceDate - Fetch emails received on or after this date
  * @param {object} client - Microsoft Graph client
@@ -341,6 +375,8 @@ export default async function pullCommand(args) {
             sourceFolderName = sourceFolder.displayName;
         }
 
+        const { oldest: oldestEmailDate, newest: newestEmailDate } = await getFolderDateBounds(client, sourceFolderId);
+
         // Fetch emails
         const emails = await fetchEmailsSinceDate(sinceDate, client, sourceFolderId);
 
@@ -403,6 +439,8 @@ export default async function pullCommand(args) {
         console.log(`  Processed:  ${processed}`);
         console.log(`  Written:    ${written}`);
         console.log(`  Skipped:    ${skipped}`);
+        console.log(`  Oldest:     ${oldestEmailDate ? oldestEmailDate.split('T')[0] : '(folder empty)'}`);
+        console.log(`  Newest:     ${newestEmailDate ? newestEmailDate.split('T')[0] : '(folder empty)'}`);
     } catch (error) {
         console.error('Error:', error.message);
         process.exit(1);

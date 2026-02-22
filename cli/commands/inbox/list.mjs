@@ -138,7 +138,7 @@ Examples:
     const senderW   = 26;
     // overhead: 3 (indent) + numWidth+1 (N.) + 2 + hashW + 2 + dateW + 2 + senderW + 2
     const overhead  = 3 + (numWidth + 1) + 2 + hashW + 2 + dateW + 2 + senderW + 2;
-    const subjectW  = Math.max(20, termWidth - overhead);
+    const subjectW  = Math.max(60, (termWidth - overhead) * 2);
 
     const label = filteredCount === 1 ? 'email' : 'emails';
     let headerLine = `${paint(String(filteredCount), palette.count)} ${label}`;

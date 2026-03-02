@@ -1,9 +1,9 @@
-import { saveEmail } from '../../lib/storage.mjs';
-import { findEmailById, colorize, colors } from '../../lib/utils.mjs';
+import { saveEmail } from '../lib/storage.mjs';
+import { findEmailById, colorize, colors } from '../lib/utils.mjs';
 
 function printUsage() {
     console.log(`
-Usage: outlook-email inbox move <id> --folder <name>
+Usage: outlook-email move <id> --folder <name>
 
 Queue an email to be moved to a folder (offline). Adds 'offline.pending.moveToFolder' to the YAML file.
 
@@ -15,8 +15,8 @@ Options:
   -h, --help        Show this help message
 
 Examples:
-  outlook-email inbox move f86bca --folder Processed
-  outlook-email inbox move f86bca --folder Alerts
+  outlook-email move f86bca --folder Processed
+  outlook-email move f86bca --folder Alerts
 `);
 }
 

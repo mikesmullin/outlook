@@ -288,6 +288,77 @@ outlook-email unread <id>
 - Re-queue emails for processing
 - Testing workflows
 
+### Command: `outlook-email send`
+
+**Purpose**: Send an email via Outlook Web using browser automation.
+
+**Command**:
+```bash
+outlook-email send --to <email> --subject <subject> [options] <file>
+```
+
+**Arguments**:
+- `<file>`: Path to a file containing the email body. Use `-` to read from stdin.
+
+**Options**:
+- `--to <email>`: Recipient email address (required)
+- `--subject <text>`: Email subject (required)
+- `--html`: Treat body as raw HTML (uses `insertHTML` — supports bold, bullets, links, etc.)
+- `--headed`: Show the browser window (default: headless)
+- `-v, --verbose`: Show progress steps
+- `--debug`: Pause at compose window for interactive JS inspection (implies `--headed`)
+
+**Output** (default, quiet):
+```
+✓ Sent: My Subject → recipient@example.com
+```
+
+**Behavior**:
+1. Builds an Outlook deeplink compose URL with To, Subject, and a body placeholder pre-filled
+2. Opens the URL in a headless Chromium browser (reusing `~/.browser_agent/` session)
+3. Waits until the browser arrives at the deeplink URL — if it doesn't (e.g. redirected to a login page), warns the user to check the browser window and keeps waiting
+4. Uses `window.find()` to locate the placeholder in the body, then replaces it via `execCommand`
+5. Clicks Send — Outlook closes the compose tab automatically
+6. Signature from your Outlook profile is preserved below the body
+
+**Plain text example**:
+```bash
+echo "Hi Alice, let's sync tomorrow." > body.txt
+outlook-email send --to alice@example.com --subject "Quick sync" body.txt
+```
+
+**HTML example**:
+```bash
+cat > email.html << 'EOF'
+<p>Hi team,</p>
+<ul>
+  <li><b>Item one</b></li>
+  <li><i>Item two</i></li>
+</ul>
+<p>See <a href="https://example.com">this link</a> for details.</p>
+EOF
+outlook-email send --to team@example.com --subject "Update" --html email.html
+```
+
+**Stdin example**:
+```bash
+echo "Quick note from a script." | outlook-email send --to alice@example.com --subject "Note" -
+```
+
+**HTML formatting support** (confirmed working):
+- `<b>`, `<i>`, `<u>`, `<b><i>` — bold, italic, underline, bold-italic
+- `<ul><li>` / `<ol><li>` — bullet and numbered lists
+- `<a href="...">` — clickable hyperlinks
+- `<blockquote>` — indented blockquote
+- `<code>` — inline monospace
+- `<p>` — paragraph spacing
+
+**Dependencies**:
+- `uv` (Python package runner) — must be on PATH
+- `browser-use` Python package — auto-installed by `uv` on first run
+- Chromium browser — managed by browser-use
+- Persistent session at `~/.browser_agent/` — created on first login
+
 ## Workflow Scenarios
 
 ### Scenario 1: Daily Email Digest Processing

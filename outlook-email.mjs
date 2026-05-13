@@ -3,6 +3,7 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
 import moveCommand from './cli/commands/move.mjs';
+import sendCommand from './cli/commands/send.mjs';
 import listCommand from './cli/commands/inbox/list.mjs';
 import viewCommand from './cli/commands/inbox/view.mjs';
 import readCommand from './cli/commands/inbox/read.mjs';
@@ -24,6 +25,7 @@ function printUsage() {
 Usage: outlook-email <command> [options]
 
 Commands:
+  send --to <email> --subject <text> [--html] <file>  Send an email via Outlook Web
   list                         List unread emails from storage
   view <id>                    Show a single email (print YAML)
   read <id>                    Queue mark-read for an email (offline)
@@ -70,7 +72,9 @@ async function main() {
 
     const mainCommand = args[0];
 
-    if (mainCommand === 'move') {
+    if (mainCommand === 'send') {
+        sendCommand(args.slice(1));
+    } else if (mainCommand === 'move') {
         try {
             await moveCommand(args.slice(1));
         } catch (error) {

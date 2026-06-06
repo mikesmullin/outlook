@@ -290,7 +290,7 @@ outlook-email unread <id>
 
 ### Command: `outlook-email send`
 
-**Purpose**: Send an email via Outlook Web using browser automation.
+**Purpose**: Send an email via SMTP (fast, headless, no browser).
 
 **Command**:
 ```bash
@@ -301,12 +301,15 @@ outlook-email send --to <email> --subject <subject> [options] <file>
 - `<file>`: Path to a file containing the email body. Use `-` to read from stdin.
 
 **Options**:
-- `--to <email>`: Recipient email address (required)
+- `--to <email>`: Recipient address(es), comma-separated (required)
 - `--subject <text>`: Email subject (required)
-- `--html`: Treat body as raw HTML (uses `insertHTML` — supports bold, bullets, links, etc.)
-- `--headed`: Show the browser window (default: headless)
-- `-v, --verbose`: Show progress steps
-- `--debug`: Pause at compose window for interactive JS inspection (implies `--headed`)
+- `--cc <email>`: CC address(es), comma-separated
+- `--bcc <email>`: BCC address(es), comma-separated
+- `--from <email>`: Override the From address (default: derived from the cached Graph token)
+- `--html`: Treat body as raw HTML (sent as a `text/html` MIME part)
+- `--smtp-host <host>`: SMTP host (default: `$SMTP_HOST`, else the sender domain's MX)
+- `--smtp-port <port>`: SMTP port (default: `$SMTP_PORT`, else `25`)
+- `-v, --verbose`: Show progress / SMTP debug output
 
 **Output** (default, quiet):
 ```
@@ -314,12 +317,13 @@ outlook-email send --to <email> --subject <subject> [options] <file>
 ```
 
 **Behavior**:
-1. Builds an Outlook deeplink compose URL with To, Subject, and a body placeholder pre-filled
-2. Opens the URL in a headless Chromium browser (reusing `~/.browser_agent/` session)
-3. Waits until the browser arrives at the deeplink URL — if it doesn't (e.g. redirected to a login page), warns the user to check the browser window and keeps waiting
-4. Uses `window.find()` to locate the placeholder in the body, then replaces it via `execCommand`
-5. Clicks Send — Outlook closes the compose tab automatically
-6. Signature from your Outlook profile is preserved below the body
+1. Reads the body from `<file>` (or stdin) and derives the From identity (address + display name) from the cached Graph token's JWT claims
+2. Builds a MIME message — `text/plain` by default, or multipart `text/html` with a plain-text fallback when `--html` is set
+3. Resolves the SMTP host at runtime — `--smtp-host` flag, else `$SMTP_HOST`, else the MX record of the sender's email domain (no host is baked into the source)
+4. Connects to that host (many internal relays accept mail with **no authentication** on the local network), opportunistically upgrading to STARTTLS if offered, then submits the message
+5. Prints a one-line confirmation
+
+> **Note**: When relying on the sender domain's MX, the resolved host may require corporate network/VPN access and may restrict delivery to internal recipients depending on the relay's policy. Override with `--smtp-host` / `$SMTP_HOST` as needed.
 
 **Plain text example**:
 ```bash
@@ -345,19 +349,12 @@ outlook-email send --to team@example.com --subject "Update" --html email.html
 echo "Quick note from a script." | outlook-email send --to alice@example.com --subject "Note" -
 ```
 
-**HTML formatting support** (confirmed working):
-- `<b>`, `<i>`, `<u>`, `<b><i>` — bold, italic, underline, bold-italic
-- `<ul><li>` / `<ol><li>` — bullet and numbered lists
-- `<a href="...">` — clickable hyperlinks
-- `<blockquote>` — indented blockquote
-- `<code>` — inline monospace
-- `<p>` — paragraph spacing
+**HTML formatting support**: Full HTML is delivered as-is in a `text/html` MIME part, so any markup your email client renders works — `<b>`, `<i>`, `<u>`, `<ul>/<ol><li>`, `<a href>`, `<blockquote>`, `<code>`, `<table>`, inline styles, etc.
 
 **Dependencies**:
-- `uv` (Python package runner) — must be on PATH
-- `browser-use` Python package — auto-installed by `uv` on first run
-- Chromium browser — managed by browser-use
-- Persistent session at `~/.browser_agent/` — created on first login
+- `python3` — must be on PATH (uses standard library only: `smtplib`, `email`)
+- `dig` or `nslookup` — used to resolve the sender domain's MX when no host is given
+- Network access to the resolved SMTP host (often corporate network/VPN)
 
 ## Workflow Scenarios
 

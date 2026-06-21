@@ -9,13 +9,9 @@ import viewCommand from './cli/commands/inbox/view.mjs';
 import readCommand from './cli/commands/inbox/read.mjs';
 import unreadCommand from './cli/commands/inbox/unread.mjs';
 import deleteCommand from './cli/commands/inbox/delete.mjs';
-import processedCommand from './cli/commands/inbox/processed.mjs';
 import searchCommand from './cli/commands/search.mjs';
-import pullCommand from './cli/commands/pull.mjs';
 import folderCommand from './cli/commands/folder.mjs';
-import cleanCommand from './cli/commands/clean.mjs';
-import planCommand from './cli/commands/plan.mjs';
-import applyCommand from './cli/commands/apply.mjs';
+import calendarCommand from './cli/commands/calendar.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,40 +21,32 @@ function printUsage() {
 Usage: outlook-email <command> [options]
 
 Commands:
-  send --to <email> --subject <text> [--html] <file>  Send an email via Outlook Web
-  list                         List unread emails from storage
-  view <id>                    Show a single email (print YAML)
-  read <id>                    Queue mark-read for an email (offline)
-  unread <id>                  Queue mark-unread for an email (offline)
+  send --to <email> --subject <text> [--html] <file>  Send an email via SMTP
+  list                         List emails from Outlook (default: Inbox)
+  view <id>                    Fetch & show a single email
+  read <id>                    Mark an email as read (immediate)
+  unread <id>                  Mark an email as unread (immediate)
+  move <id> --folder <name>    Move an email to a folder (immediate)
+  delete <id>                  Delete an email → Deleted Items (confirms first)
   folders                      List all mailbox folders as a tree
-  move <id>                    Queue move to a folder (offline)
-  delete <id>                  Queue soft-delete for an email (offline)
-  processed <id>               Toggle local "processed" flag on an email (offline-only)
-  search <query>               Search emails via Microsoft Graph (online)
-  pull --since <date>          Fetch emails from Outlook to local cache
-  plan                         Preview queued offline changes
-  apply [-y]                   Apply queued changes to Outlook (-y skips prompt)
-  clean                        Clear all local cached emails in storage/
+  search <query>               Search emails via Microsoft Graph
+  calendar list|view           Read your Outlook calendar
 
-Options depend on the command. Use:
+Ids are short ids printed by 'list' / 'search' (cached in db/idmap.yml).
+Use:
   outlook-email <command> --help
 
 Examples:
   outlook-email list --limit 20
-  outlook-email list --all
+  outlook-email list --folder Processed --unread-only
   outlook-email search "SSL classicteam"
-  outlook-email search "subject:SSL" --folder Inbox
-  outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b
-  outlook-email read 6498cec18d676f08ff64932bf93e7ec33c0adb2b
-  outlook-email unread 6498cec18d676f08ff64932bf93e7ec33c0adb2b
+  outlook-email view 6498ce
+  outlook-email read 6498ce
+  outlook-email move 6498ce --folder Processed
+  outlook-email delete 6498ce
   outlook-email folders
-  outlook-email move f86bca --folder Processed
-  outlook-email delete f591c0
-  outlook-email pull --since 2026-01-01
-  outlook-email plan
-  outlook-email apply
-  outlook-email apply --yes
-  outlook-email clean
+  outlook-email calendar list --days 7
+  outlook-email calendar view a1b2c3
 `);
 }
 
@@ -116,13 +104,6 @@ async function main() {
             console.error('Error:', error.message);
             process.exit(1);
         }
-    } else if (mainCommand === 'processed') {
-        try {
-            await processedCommand(args.slice(1));
-        } catch (error) {
-            console.error('Error:', error.message);
-            process.exit(1);
-        }
     } else if (mainCommand === 'search') {
         try {
             await searchCommand(args.slice(1));
@@ -130,37 +111,16 @@ async function main() {
             console.error('Error:', error.message);
             process.exit(1);
         }
+    } else if (mainCommand === 'calendar' || mainCommand === 'cal') {
+        try {
+            await calendarCommand(args.slice(1));
+        } catch (error) {
+            console.error('Error:', error.message);
+            process.exit(1);
+        }
     } else if (mainCommand === 'folders') {
         try {
             await folderCommand(args.slice(1));
-        } catch (error) {
-            console.error('Error:', error.message);
-            process.exit(1);
-        }
-    } else if (mainCommand === 'pull') {
-        try {
-            await pullCommand(args.slice(1));
-        } catch (error) {
-            console.error('Error:', error.message);
-            process.exit(1);
-        }
-    } else if (mainCommand === 'plan') {
-        try {
-            await planCommand(args.slice(1));
-        } catch (error) {
-            console.error('Error:', error.message);
-            process.exit(1);
-        }
-    } else if (mainCommand === 'apply') {
-        try {
-            await applyCommand(args.slice(1));
-        } catch (error) {
-            console.error('Error:', error.message);
-            process.exit(1);
-        }
-    } else if (mainCommand === 'clean') {
-        try {
-            await cleanCommand(args.slice(1));
         } catch (error) {
             console.error('Error:', error.message);
             process.exit(1);

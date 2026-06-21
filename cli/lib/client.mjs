@@ -114,6 +114,86 @@ class AzureCliAuthProvider {
     }
 }
 
+/**
+ * Graph `Prefer` header value that asks for immutable item IDs. Immutable IDs
+ * survive a `move` (mutable Graph IDs change on move), so the local id-map never
+ * goes stale across folder moves.
+ */
+export const IMMUTABLE_ID_PREFER = 'IdType="ImmutableId"';
+
+/**
+ * Start a Graph request for a *message* endpoint with the immutable-ID header
+ * applied. Centralizes the `Prefer: IdType="ImmutableId"` header so every message
+ * read/mutation returns and accepts stable IDs.
+ * @param {object} client - Microsoft Graph client
+ * @param {string} apiPath - Graph API path (e.g. `/me/messages/{id}`)
+ * @returns {object} a GraphRequest with the Prefer header set
+ */
+export function msgApi(client, apiPath) {
+    return client.api(apiPath).header('Prefer', IMMUTABLE_ID_PREFER);
+}
+
+/**
+ * Resolve a mailbox folder by display name (breadth-first across the folder
+ * tree). Shared by commands that target a folder by name (move, search).
+ * @param {object} client - Microsoft Graph client
+ * @param {string} targetName - Folder display name (case-insensitive)
+ * @returns {Promise<object|null>} the folder object, or null if not found
+ */
+export async function findFolderByName(client, targetName) {
+    const normalizedTarget = targetName.trim().toLowerCase();
+
+    async function getRoot() {
+        const res = await client
+            .api('/me/mailFolders')
+            .select('id,displayName,childFolderCount')
+            .top(200)
+            .get();
+        return res.value || [];
+    }
+
+    async function getChildren(folderId) {
+        const res = await client
+            .api(`/me/mailFolders/${folderId}/childFolders`)
+            .select('id,displayName,childFolderCount')
+            .top(200)
+            .get();
+        return res.value || [];
+    }
+
+    const queue = await getRoot();
+    while (queue.length > 0) {
+        const folder = queue.shift();
+        if ((folder.displayName || '').trim().toLowerCase() === normalizedTarget) {
+            return folder;
+        }
+        if (folder.childFolderCount && folder.childFolderCount > 0) {
+            queue.push(...(await getChildren(folder.id)));
+        }
+    }
+    return null;
+}
+
+/**
+ * Translate Graph message ids to immutable ids in one batch call. Some endpoints
+ * (notably `$search`) ignore the `Prefer: IdType="ImmutableId"` header and return
+ * mutable ids; this converts them so every command shares one stable id space.
+ * @param {object} client - Microsoft Graph client
+ * @param {string[]} ids - source (rest) ids
+ * @returns {Promise<string[]>} immutable ids, in the same order as input
+ */
+export async function toImmutableIds(client, ids) {
+    if (!ids || ids.length === 0) return [];
+    const res = await client.api('/me/translateExchangeIds').post({
+        inputIds: ids,
+        sourceIdType: 'restId',
+        targetIdType: 'restImmutableEntryId',
+    });
+    const map = new Map((res.value || []).map((r) => [r.sourceId, r.targetId]));
+    // Fall back to the original id if translation didn't return one.
+    return ids.map((id) => map.get(id) || id);
+}
+
 export async function getGraphClient() {
     const authProvider = new AzureCliAuthProvider();
     const accessToken = await authProvider.getAccessToken();

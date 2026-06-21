@@ -1,11 +1,11 @@
-import { loadAllEmails, getEmailFolder } from '../../lib/storage.mjs';
+import { getGraphClient, msgApi, findFolderByName } from '../../lib/client.mjs';
+import { upsertMany } from '../../lib/idmap.mjs';
 import {
     palette,
     paint,
     truncate,
     formatRelativeDate,
     formatSenderShort,
-    getShortId,
 } from '../../lib/utils.mjs';
 
 const DEFAULT_LIMIT = 10;
@@ -18,8 +18,7 @@ function parseDate(dateStr) {
     } else if (dateStr.endsWith('ago')) {
         const match = dateStr.match(/^(\d+)\s+days?\s+ago$/i);
         if (match) {
-            const daysAgo = parseInt(match[1], 10);
-            date.setDate(date.getDate() - daysAgo);
+            date.setDate(date.getDate() - parseInt(match[1], 10));
         } else {
             throw new Error(`Invalid date format: "${dateStr}". Use "N days ago" format.`);
         }
@@ -40,127 +39,108 @@ export default async function listCommand(args) {
         console.log(`
 Usage: outlook-email list [options]
 
-List emails from storage (newest first).
+List emails directly from Outlook (newest first). Each row's short id is cached
+locally so you can pass it to view/read/unread/move/delete.
 
 Options:
+  --folder <name>      Mailbox folder to list (default: Inbox)
   -l, --limit <n>      Maximum emails to list (default: ${DEFAULT_LIMIT})
-  --since <date>       Only show emails after this date
+  --since <date>       Only show emails received on/after this date
                        Formats: YYYY-MM-DD, yesterday, "N days ago"
-  --folder <name>      Only show emails from this source folder
-  --all                Include emails already marked as processed
+  --unread-only        Only show unread emails
   --help               Show this help
 
 Examples:
   outlook-email list
   outlook-email list --limit 20
-  outlook-email list --folder Alerts
-  outlook-email list --since 2026-01-01
+  outlook-email list --folder Processed
+  outlook-email list --since 2026-01-01 --unread-only
 `);
         return;
     }
 
     let limit = DEFAULT_LIMIT;
     let sinceDate = null;
-    let folderFilter = null;
-    let includeProcessed = false;
+    let folderName = 'Inbox';
+    let unreadOnly = false;
 
-    // Parse arguments
     for (let i = 0; i < args.length; i++) {
-        if (args[i] === '--all') {
-            includeProcessed = true;
+        if (args[i] === '--unread-only') {
+            unreadOnly = true;
         } else if (args[i] === '-l' || args[i] === '--limit') {
-            if (i + 1 < args.length) {
-                limit = parseInt(args[i + 1], 10);
-                if (isNaN(limit) || limit <= 0) {
-                    throw new Error('--limit must be a positive number');
-                }
-                i++;
-            }
+            limit = parseInt(args[++i], 10);
+            if (isNaN(limit) || limit <= 0) throw new Error('--limit must be a positive number');
         } else if (args[i] === '--since') {
-            if (i + 1 < args.length) {
-                sinceDate = parseDate(args[i + 1]);
-                i++;
-            }
+            sinceDate = parseDate(args[++i]);
         } else if (args[i] === '--folder') {
-            if (i + 1 < args.length) {
-                folderFilter = args[i + 1].trim().toLowerCase();
-                i++;
-            }
+            folderName = args[++i];
         }
     }
 
-    let emails = await loadAllEmails();
-    const totalInStorage = emails.length;
+    const { client } = await getGraphClient();
 
-    // Filter out processed emails unless --all is passed
-    if (!includeProcessed) {
-        emails = emails.filter(({ email }) => email.offline?.processed !== true);
+    // Resolve folder (Inbox is a well-known id; others resolved by name)
+    let folderId = 'inbox';
+    if (folderName && folderName.trim().toLowerCase() !== 'inbox') {
+        const folder = await findFolderByName(client, folderName);
+        if (!folder) {
+            console.error(`Folder not found: ${folderName}`);
+            process.exit(1);
+        }
+        folderId = folder.id;
     }
 
-    // Filter by folder
-    if (folderFilter) {
-        emails = emails.filter(({ email }) => {
-            const src = getEmailFolder(email).trim().toLowerCase();
-            return src === folderFilter;
-        });
+    let request = msgApi(client, `/me/mailFolders/${folderId}/messages`)
+        .select('id,from,subject,receivedDateTime,isRead,bodyPreview')
+        .orderby('receivedDateTime desc')
+        .top(Math.min(limit, 50));
+
+    const filters = [];
+    if (sinceDate) filters.push(`receivedDateTime ge ${sinceDate.toISOString()}`);
+    if (unreadOnly) filters.push('isRead eq false');
+    if (filters.length) request = request.filter(filters.join(' and '));
+
+    let emails;
+    try {
+        const response = await request.get();
+        emails = response.value || [];
+    } catch (error) {
+        console.error('List failed:', error.message);
+        process.exit(1);
     }
 
-    // Filter by date
-    if (sinceDate) {
-        emails = emails.filter(({ email }) => {
-            const receivedDate = new Date(email.receivedDateTime);
-            return receivedDate >= sinceDate;
-        });
-    }
-
-    // Sort by date (newest first)
-    emails.sort(({ email: a }, { email: b }) => {
-        const dateA = new Date(a.receivedDateTime);
-        const dateB = new Date(b.receivedDateTime);
-        return dateB - dateA;
-    });
+    emails = emails.slice(0, limit);
 
     if (emails.length === 0) {
         console.log('No emails found.');
         return;
     }
 
-    const filteredCount = emails.length;
-    const displayCount = Math.min(limit, filteredCount);
-    const remaining = filteredCount - displayCount;
-    const hiddenByFilter = totalInStorage - filteredCount;
-    const termWidth = process.stdout.columns || 120;
+    // Populate the short→full id-map for every row we show.
+    const shorts = await upsertMany(emails.map((e) => e.id));
 
-    // column widths
-    const numWidth  = String(displayCount).length; // digits in largest line number
+    const termWidth = process.stdout.columns || 120;
+    const numWidth  = String(emails.length).length;
     const hashW     = 6;
-    const dateW     = 9; // e.g. "just now" = 8, "23h ago" = 7
+    const dateW     = 9;
     const senderW   = 26;
-    // overhead: 3 (indent) + numWidth+1 (N.) + 2 + hashW + 2 + dateW + 2 + senderW + 2
     const overhead  = 3 + (numWidth + 1) + 2 + hashW + 2 + dateW + 2 + senderW + 2;
     const subjectW  = Math.max(60, (termWidth - overhead) * 2);
 
-    const label = filteredCount === 1 ? 'email' : 'emails';
-    let headerLine = `${paint(String(filteredCount), palette.count)} ${label}`;
-    if (displayCount < filteredCount) {
-        headerLine += ` ${paint(`(showing ${displayCount})`, palette.muted)}`;
-    }
-    const shown = headerLine + ':';
+    const label = emails.length === 1 ? 'email' : 'emails';
+    const folderLabel = folderId === 'inbox' ? 'Inbox' : folderName;
+    const shown = `${paint(String(emails.length), palette.count)} ${label} in ${paint(folderLabel, palette.sender)}:`;
 
-    // BOL = CHA(1): force cursor to column 1 BEFORE writing content.
-    // This defeats any cursor drift from wide/emoji chars on the previous line.
     const BOL = '\x1b[1G';
-    // Separate writes: blank line, then header, then blank line separator.
-    // Keeps spacing consistent across bare terminal and tmux/mari.
     process.stdout.write(BOL + '\n');
     process.stdout.write(BOL + '📧 ' + shown + '\n');
     process.stdout.write(BOL + '\n');
 
-    for (let i = 0; i < displayCount; i++) {
-        const { id, email } = emails[i];
-
+    for (let i = 0; i < emails.length; i++) {
+        const email = emails[i];
         const lineNum  = String(i + 1).padStart(numWidth) + '.';
-        const hashStr  = getShortId(id);
+        const hashStr  = shorts[i];
+        const unreadDot = email.isRead ? ' ' : paint('•', palette.count);
         const dateStr  = formatRelativeDate(email.receivedDateTime).padEnd(dateW);
         const senderStr = truncate(formatSenderShort(email), senderW).padEnd(senderW);
         const subjectStr = truncate(email.subject || '(No Subject)', subjectW);
@@ -168,7 +148,8 @@ Examples:
         process.stdout.write(
             BOL +
             `   ${paint(lineNum, palette.lineNum)}` +
-            `  ${paint(hashStr, palette.hash)}` +
+            ` ${unreadDot}` +
+            ` ${paint(hashStr, palette.hash)}` +
             `  ${paint(dateStr, palette.date)}` +
             `  ${paint(senderStr, palette.sender)}` +
             `  ${paint(subjectStr, palette.subject)}` +
@@ -176,8 +157,5 @@ Examples:
         );
     }
 
-    if (remaining > 0) {
-        process.stdout.write('\n' + BOL + `   ${paint(`... and ${remaining} more`, palette.muted)}` + '\n');
-    }
     process.stdout.write('\n');
 }

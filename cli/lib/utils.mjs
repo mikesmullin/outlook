@@ -1,5 +1,3 @@
-import { loadAllEmails } from './storage.mjs';
-
 // ─── legacy 3-bit ANSI (kept for backward compat) ────────────────────────────
 export const colors = {
     reset:   '\x1b[0m',
@@ -82,42 +80,6 @@ export function truncate(str, maxLen) {
     if (!str) return '';
     if (str.length <= maxLen) return str;
     return str.substring(0, maxLen - 3) + '...';
-}
-
-/**
- * Find an email by partial or full ID
- * @param {string} partialId - Full ID or partial ID prefix
- * @returns {Promise<{id: string, email: object} | null>}
- */
-export async function findEmailById(partialId) {
-    const emails = await loadAllEmails();
-    
-    // Normalize partial ID (remove .md or .yml if present)
-    const normalized = partialId.replace('.md', '').replace('.yml', '').toLowerCase();
-    
-    // Find exact match first
-    for (const { id, email } of emails) {
-        if (id === normalized) {
-            return { id, email };
-        }
-    }
-    
-    // Find prefix match (like git does)
-    const matches = emails.filter(({ id }) => id.startsWith(normalized));
-    
-    if (matches.length === 0) {
-        return null;
-    }
-    
-    if (matches.length === 1) {
-        const { id, email } = matches[0];
-        return { id, email };
-    }
-    
-    // Multiple matches
-    throw new Error(
-        `Ambiguous ID "${partialId}". Matches: ${matches.map(({ id }) => id).join(', ')}`
-    );
 }
 
 /**

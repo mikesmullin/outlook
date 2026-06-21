@@ -1,4 +1,5 @@
-import { findEmailById } from '../../lib/utils.mjs';
+import { getGraphClient, msgApi } from '../../lib/client.mjs';
+import { resolveId, removeByFullId } from '../../lib/idmap.mjs';
 import yaml from 'js-yaml';
 
 /**
@@ -7,18 +8,12 @@ import yaml from 'js-yaml';
  */
 function stripHtml(html) {
     if (!html) return '';
-    // Block-level elements that should become newlines
     const BLOCK = 'p|div|li|ul|ol|tr|td|th|h[1-6]|blockquote|pre|section|article|header|footer|nav|main|figure|figcaption|table|thead|tbody|tfoot';
     return html
-        // self-closing / void block tags
         .replace(/<(br|hr)(\s*\/?)>/gi, '\n')
-        // opening block tags  → newline
         .replace(new RegExp(`<(${BLOCK})(\\s[^>]*)?>`, 'gi'), '\n')
-        // closing block tags → newline
         .replace(new RegExp(`<\\/(${BLOCK})>`, 'gi'), '\n')
-        // collapse all remaining (inline) tags to a single space
         .replace(/(\s*<[^>]+>\s*)+/g, ' ')
-        // decode common entities
         .replace(/&nbsp;/g, ' ')
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
@@ -26,7 +21,6 @@ function stripHtml(html) {
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
         .replace(/&apos;/g, "'")
-        // collapse runs of blank lines to max 2
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 }
@@ -43,9 +37,14 @@ function formatAddressList(list) {
     return list.map(formatAddress).filter(Boolean).join(', ');
 }
 
+const MESSAGE_SELECT = [
+    'id', 'from', 'toRecipients', 'ccRecipients', 'bccRecipients',
+    'subject', 'receivedDateTime', 'isRead', 'importance', 'hasAttachments',
+    'webLink', 'body', 'bodyPreview',
+].join(',');
+
 export default async function viewCommand(args) {
-    // parse flags — id is first non-flag arg
-    let mode = 'yaml';  // default
+    let mode = 'text';  // default: headers + plain-text body
     let partialId = null;
 
     for (const arg of args) {
@@ -53,22 +52,18 @@ export default async function viewCommand(args) {
             console.log(`
 Usage: outlook-email view <id> [--yaml|--text]
 
-Display a single email from storage.
+Fetch and display a single email directly from Outlook.
 
 Arguments:
-  <id>    Email hash ID, partial ID, or filename
-          - Full: 6498cec18d676f08ff64932bf93e7ec33c0adb2b
-          - Partial: 6498cec (as long as unique)
-          - Filename: 6498cec18d676f08ff64932bf93e7ec33c0adb2b.yml
+  <id>    Short id (from list/search), unique prefix, or full Graph id
 
 Options:
-  --yaml  Print full YAML (default)
-  --text  Print headers + plain-text body (HTML tags stripped)
+  --text  Print headers + plain-text body (HTML stripped) [default]
+  --yaml  Print full message metadata + body as YAML
 
 Examples:
-  outlook-email view 6498cec
-  outlook-email view 6498cec --text
-  outlook-email view 6498cec18d676f08ff64932bf93e7ec33c0adb2b
+  outlook-email view 6498ce
+  outlook-email view 6498ce --yaml
 `);
             return;
         } else if (arg === '--yaml') {
@@ -85,47 +80,54 @@ Examples:
         process.exit(1);
     }
 
-    const result = await findEmailById(partialId);
-
-    if (!result) {
-        console.error(`Email not found: ${partialId}`);
+    const fullId = await resolveId(partialId);
+    if (!fullId) {
+        console.error(`Email not found: ${partialId} (run "outlook-email list" or "search" first to cache ids)`);
         process.exit(1);
     }
 
-    const { email } = result;
+    const { client } = await getGraphClient();
 
-    if (mode === 'text') {
-        // Headers
-        const from    = formatAddress(email.from);
-        const to      = formatAddressList(email.toRecipients);
-        const cc      = formatAddressList(email.ccRecipients);
-        const bcc     = formatAddressList(email.bccRecipients);
-        const subject = email.subject || '(No Subject)';
-        const date    = email.receivedDateTime
-            ? new Date(email.receivedDateTime).toLocaleString()
-            : '';
-
-        const headers = [
-            `From:    ${from}`,
-            `To:      ${to}`,
-            cc  ? `Cc:      ${cc}`  : null,
-            bcc ? `Bcc:     ${bcc}` : null,
-            `Subject: ${subject}`,
-            `Date:    ${date}`,
-        ].filter(Boolean).join('\n');
-
-        // Body
-        const bodyContent = email.body?.content || '';
-        const contentType = (email.body?.contentType || 'text').toLowerCase();
-        const bodyText = contentType === 'html' ? stripHtml(bodyContent) : bodyContent.trim();
-
-        console.log(headers + '\n\n' + bodyText);
-    } else {
-        const ymlContent = yaml.dump(email, {
-            indent: 2,
-            lineWidth: -1,
-            flowLevel: -1,
-        });
-        console.log(ymlContent);
+    let email;
+    try {
+        email = await msgApi(client, `/me/messages/${fullId}`).select(MESSAGE_SELECT).get();
+    } catch (error) {
+        if (error.statusCode === 404 || error.code === 'ErrorItemNotFound') {
+            await removeByFullId(fullId);
+            console.error(`Email no longer exists in Outlook (stale id dropped): ${partialId}`);
+            console.error('Run "outlook-email list" to refresh.');
+            process.exit(1);
+        }
+        throw error;
     }
+
+    if (mode === 'yaml') {
+        console.log(yaml.dump(email, { indent: 2, lineWidth: -1, flowLevel: -1 }));
+        return;
+    }
+
+    const from    = formatAddress(email.from);
+    const to      = formatAddressList(email.toRecipients);
+    const cc      = formatAddressList(email.ccRecipients);
+    const bcc     = formatAddressList(email.bccRecipients);
+    const subject = email.subject || '(No Subject)';
+    const date    = email.receivedDateTime
+        ? new Date(email.receivedDateTime).toLocaleString()
+        : '';
+
+    const headers = [
+        `From:    ${from}`,
+        `To:      ${to}`,
+        cc  ? `Cc:      ${cc}`  : null,
+        bcc ? `Bcc:     ${bcc}` : null,
+        `Subject: ${subject}`,
+        `Date:    ${date}`,
+        email.webLink ? `Link:    ${email.webLink}` : null,
+    ].filter(Boolean).join('\n');
+
+    const bodyContent = email.body?.content || '';
+    const contentType = (email.body?.contentType || 'text').toLowerCase();
+    const bodyText = contentType === 'html' ? stripHtml(bodyContent) : bodyContent.trim();
+
+    console.log(headers + '\n\n' + bodyText);
 }

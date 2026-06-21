@@ -1,4 +1,4 @@
-Connect-MgGraph -Scopes "Mail.Read","Mail.ReadWrite"
+Connect-MgGraph -Scopes "Mail.Read","Mail.ReadWrite","Calendars.Read"
 
 # Grab your signed-in account (UPN) from the current Graph context
 $upn = (Get-MgContext).Account

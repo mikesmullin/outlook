@@ -1,78 +1,93 @@
-import { parseArgs } from 'util';
-import { saveEmail } from '../../lib/storage.mjs';
-import { findEmailById, paint, palette, pink, mint, yellow, dim } from '../../lib/utils.mjs';
+import { createInterface } from 'readline';
+import { getGraphClient, msgApi } from '../../lib/client.mjs';
+import { resolveId, removeByFullId } from '../../lib/idmap.mjs';
+import { paint, palette, mint, pink, yellow, dim } from '../../lib/utils.mjs';
+
+function confirm(prompt) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise((resolve) => {
+        rl.question(prompt, (answer) => {
+            rl.close();
+            const n = answer.trim().toLowerCase();
+            resolve(n === 'y' || n === 'yes');
+        });
+    });
+}
 
 export default async function deleteCommand(args) {
     if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
         console.log(`
-Usage: outlook-email delete <id> [--clear]
+Usage: outlook-email delete <id> [--yes]
 
-Queue an email for soft-deletion (offline). The email will be moved to Deleted
-Items in Outlook when you run "outlook-email apply".
+Delete an email in Outlook (moves it to Deleted Items, recoverable). Prompts for
+confirmation first unless --yes is given.
 
 Arguments:
-  <id>          Email hash ID or partial ID (e.g., f591c0)
+  <id>          Short id (from list/search), unique prefix, or full Graph id
 
 Options:
-  -c, --clear   Remove the deletion marker (undo)
+  -y, --yes     Skip the confirmation prompt
   -h, --help    Show this help
 
 Examples:
-  outlook-email delete f591c0
-  outlook-email delete --clear f591c0
+  outlook-email delete 6498ce
+  outlook-email delete 6498ce --yes
 `);
         return;
     }
 
-    const { values, positionals } = parseArgs({
-        args,
-        options: {
-            clear: { type: 'boolean', short: 'c', default: false },
-            help:  { type: 'boolean', short: 'h' },
-        },
-        allowPositionals: true,
-    });
+    let partialId = null;
+    let skipConfirm = false;
+    for (const arg of args) {
+        if (arg === '-y' || arg === '--yes') skipConfirm = true;
+        else if (!arg.startsWith('-')) partialId = partialId || arg;
+    }
 
-    if (positionals.length === 0) {
+    if (!partialId) {
         console.error(`${pink('✗')} Error: <id> argument required`);
         process.exit(1);
     }
 
-    const partialId = positionals[0];
-    const result = await findEmailById(partialId);
-
-    if (!result) {
-        console.error(`${pink('✗')} Email not found: ${partialId}`);
+    const fullId = await resolveId(partialId);
+    if (!fullId) {
+        console.error(`${pink('✗')} Email not found: ${partialId} (run "outlook-email list" first)`);
         process.exit(1);
     }
 
-    const { id, email } = result;
-    const subject = email.subject || '(No Subject)';
-    const shortId = id.substring(0, 6);
+    const { client } = await getGraphClient();
 
-    if (!email.offline) email.offline = {};
-    if (!email.offline.pending) email.offline.pending = {};
-
-    if (values.clear) {
-        if (!email.offline.pending.delete) {
-            console.log(`${yellow('⊘')} ${paint(shortId, palette.hash)} not marked for deletion`);
-            return;
+    // Fetch metadata to confirm against locally before mutating remotely.
+    let email;
+    try {
+        email = await msgApi(client, `/me/messages/${fullId}`)
+            .select('id,subject,from,receivedDateTime')
+            .get();
+    } catch (error) {
+        if (error.statusCode === 404 || error.code === 'ErrorItemNotFound') {
+            await removeByFullId(fullId);
+            console.error(`${pink('✗')} Email no longer exists (stale id dropped): ${partialId}`);
+            process.exit(1);
         }
-        delete email.offline.pending.delete;
-        if (Object.keys(email.offline.pending).length === 0) delete email.offline.pending;
-        if (Object.keys(email.offline).length === 0) delete email.offline;
-        await saveEmail(id, email);
-        console.log(`${mint('✓')} Cleared deletion marker: ${paint(shortId, palette.hash)}`);
-        console.log(`  ${paint(subject, palette.subject)}`);
-    } else {
-        if (email.offline.pending.delete) {
-            console.log(`${yellow('⊘')} ${paint(shortId, palette.hash)} already marked for deletion`);
-            return;
-        }
-        email.offline.pending.delete = true;
-        await saveEmail(id, email);
-        console.log(`${pink('✓')} Marked for deletion: ${paint(shortId, palette.hash)}`);
-        console.log(`  ${paint(subject, palette.subject)}`);
-        console.log(`  ${dim('Run "outlook-email apply" to soft-delete from Outlook.')}`);
+        throw error;
     }
+
+    const subject = email.subject || '(No Subject)';
+    const sender = email.from?.emailAddress?.name || email.from?.emailAddress?.address || 'Unknown';
+
+    if (!skipConfirm) {
+        console.log(`${yellow('⚠')}  Delete this email (→ Deleted Items)?`);
+        console.log(`   ${paint(partialId, palette.hash)}  ${paint(sender, palette.sender)}`);
+        console.log(`   ${paint(subject, palette.subject)}`);
+        const ok = await confirm(`   ${dim('Confirm? [y/N] ')}`);
+        if (!ok) {
+            console.log(`${dim('Cancelled.')}`);
+            return;
+        }
+    }
+
+    await msgApi(client, `/me/messages/${fullId}`).delete();
+    await removeByFullId(fullId);
+
+    console.log(`${mint('✓')} Deleted: ${paint(partialId, palette.hash)}`);
+    console.log(`  ${paint(subject, palette.subject)}`);
 }

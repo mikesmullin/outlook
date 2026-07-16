@@ -44,7 +44,11 @@ export async function saveIdMap(map) {
     await fs.mkdir(DB_DIR, { recursive: true });
     const sorted = {};
     for (const key of Object.keys(map).sort()) sorted[key] = map[key];
-    await fs.writeFile(IDMAP_PATH, yaml.dump(sorted, { lineWidth: -1 }), 'utf8');
+    await fs.writeFile(
+        IDMAP_PATH,
+        yaml.dump(sorted, { forceQuotes: true, lineWidth: -1, quotingType: "'" }),
+        'utf8'
+    );
 }
 
 /**

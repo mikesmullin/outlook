@@ -46,7 +46,11 @@ export async function saveIdMap(map) {
     for (const key of Object.keys(map).sort()) sorted[key] = map[key];
     await fs.writeFile(
         IDMAP_PATH,
-        yaml.dump(sorted, { forceQuotes: true, lineWidth: -1, quotingType: "'" }),
+        yaml.dump(sorted, {
+            forceQuotes: true,
+            lineWidth: -1,
+            quotingType: "'",
+        }),
         'utf8'
     );
 }
